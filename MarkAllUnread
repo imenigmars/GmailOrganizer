@@ -1,0 +1,107 @@
+# Include 'credentials.json' file from google cloud in your working file
+
+import os.path
+import PySimpleGUI as sg
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.metadata"
+]
+
+
+def mark_unread_emails_as_read():
+    """Marks all unread emails as read."""
+    creds = None
+    # The file token.json stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    # Check if the token.json file exists and load credentials if available
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+
+    # If there are no (valid) credentials available, let the user log in.
+    # Check if credentials are valid, and refresh if expired
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Perform OAuth 2.0 authorization flow if no valid credentials are available
+            flow = InstalledAppFlow.from_client_secrets_file(
+                "credentials.json", SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    try:
+        # Build the Gmail service using obtained credentials
+        service = build("gmail", "v1", credentials=creds)
+
+        while True:
+            # Retrieve unread messages with pagination
+            results = service.users().messages().list(
+                userId="me",
+                labelIds=["UNREAD"]
+            ).execute()
+            unread_messages = results.get("messages", [])
+
+            if not unread_messages:
+                # Return a message if no unread messages are found
+                return "No more unread messages left!"
+
+            # Create a list of message IDs to mark as read
+            message_ids = [message["id"] for message in unread_messages]
+
+            # Batch update messages to mark as read
+            service.users().messages().batchModify(
+                userId="me",
+                body={"ids": message_ids, "removeLabelIds": ["UNREAD"]}
+            ).execute()
+
+    except HttpError as error:
+        # Handle HTTP errors, if any
+        return f"An error occurred: {error}"
+
+
+def main():
+    sg.theme("Topanga")
+
+    layout = [
+        [sg.Text("Click the button to mark all unread emails as read:")],
+        [sg.Button("Mark Unread Emails as Read", key="-MARK-")],
+    ]
+
+    # Create the PySimpleGUI window
+    window = sg.Window("Mark Unread Emails", layout, resizable=True)
+
+    # Main event loop for the GUI window
+    while True:
+        # Read events and values from the window
+        event, values = window.read()
+
+        # Close the window if the close button is clicked
+        if event == sg.WINDOW_CLOSED:
+            break
+        # If the mark button is clicked, initiate the process to mark unread emails as read
+        elif event == "-MARK-":
+            window.close()  # Close the window before performing the process
+            # Display a popup indicating that the process is being executed
+            sg.popup_no_wait("Processing...\nReading and marking emails as read.", title="Processing", auto_close=True)
+            # Call the function to mark unread emails as read
+            status = mark_unread_emails_as_read()
+            # Display a popup with the status of the process
+            sg.popup(status, title="Process Complete")
+            break  # Exit the loop after completing the process
+
+    window.close()  # Close the window after exiting the loop
+
+
+if __name__ == "__main__":
+    main()
